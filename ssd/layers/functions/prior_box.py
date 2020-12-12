@@ -5,8 +5,7 @@ import torch
 
 
 class PriorBox(object):
-    """Compute priorbox coordinates in center-offset form for each source
-    feature map.
+    """Compute priorbox coordinates in center-offset form for each source feature map.
     """
     def __init__(self, cfg):
         super(PriorBox, self).__init__()

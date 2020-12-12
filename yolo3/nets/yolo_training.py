@@ -177,9 +177,9 @@ class YOLOLoss(nn.Module):
         subtract_index = [0, 3, 6][self.feature_length.index(in_w)]
 
         mask = torch.zeros(bs, int(self.num_anchors/3),
-                           in_h, in_w, requires_grad=False)
+                           in_h, in_w, requires_grad=False).cuda()
         noobj_mask = torch.ones(
-            bs, int(self.num_anchors/3), in_h, in_w, requires_grad=False)
+            bs, int(self.num_anchors/3), in_h, in_w, requires_grad=False).cuda()
 
         tx = torch.zeros(bs, int(self.num_anchors/3),
                          in_h, in_w, requires_grad=False).cuda()

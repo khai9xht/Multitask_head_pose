@@ -74,8 +74,7 @@ class CapsuleLayer1d(nn.Module):
                 #result = u_hat*outputs.T
                 #result shape: [batch,num_out_capsule,num_in_capsule,1]
                 b = b + torch.matmul(u_hat,torch.transpose(outputs,2,3)).squeeze(3)
-                #reduced result shape: [batch,num_out_capsule,num_in_capsule]
-                b = b
+
 
         #reduced result shape: [batch,num_out_capsule,out_capsule_dim]
         outputs = outputs.squeeze(2)
@@ -222,22 +221,24 @@ class FSANet(nn.Module):
         return x
 
 if __name__ == '__main__':
-    num_primcaps = 7*3
-    primcaps_dim = 32
+    num_primcaps = 3*3
+    primcaps_dim = 8
     num_out_capsule = 3
-    out_capsule_dim = 16
+    out_capsule_dim = 8
     routings = 2
+    num_anchors = 3
     torch.random.manual_seed(10)
+    num_grids = 52
     model = FSANet(num_primcaps, primcaps_dim, num_out_capsule, out_capsule_dim, routings, var=True).to('cuda')
     # model = CapsuleLayer1d(num_primcaps,primcaps_dim,num_out_capsule,out_capsule_dim,routings).to('cuda')
     print('##############PyTorch################')
-    x = torch.randn(4, 3*3*7*32*2, 52, 52).to('cuda')
-    x = x.view((4*52*52*3*2,7*3,32))
+    batch = num_primcaps*primcaps_dim*routings*num_anchors
+    x = torch.randn(4, batch, num_grids, num_grids).to('cuda')
+    x = x.view((4*num_grids*num_grids*num_anchors*routings,num_primcaps,primcaps_dim))
     print(x.shape)
     y = model(x)
     print(model)
 
     print("Output:", y.shape)
-    # y = y.view(64, 3, 3, 52, 52).contiguous()
-    # print(y.shape)
+
 

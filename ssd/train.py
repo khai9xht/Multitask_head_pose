@@ -29,7 +29,7 @@ parser.add_argument('--dataset_root', default=VOC_ROOT,
                     help='Dataset root directory path')
 parser.add_argument('--basenet', default='vgg16_reducedfc.pth',
                     help='Pretrained base model')
-parser.add_argument('--batch_size', default=32, type=int,
+parser.add_argument('--batch_size', default=4, type=int,
                     help='Batch size for training')
 parser.add_argument('--resume', default=None, type=str,
                     help='Checkpoint state_dict file to resume training from')
@@ -49,7 +49,7 @@ parser.add_argument('--gamma', default=0.1, type=float,
                     help='Gamma update for SGD')
 parser.add_argument('--visdom', default=False, type=str2bool,
                     help='Use visdom for loss visualization')
-parser.add_argument('--save_folder', default='weights/',
+parser.add_argument('--save_folder', default='/media/2tb/Hoang/multitask/logs/vgg16/',
                     help='Directory for saving checkpoint models')
 args = parser.parse_args()
 
@@ -168,13 +168,15 @@ def train():
         if args.cuda:
             images = Variable(images.to(device))
             targets = [Variable(ann.to(device), volatile=True) for ann in targets]
-            print(f"[INFO] targets: {targets.size}")
         else:
             images = Variable(images)
             targets = [Variable(ann, volatile=True) for ann in targets]
+
+        # print(f"[INFO] targets: {len(targets)}")
         # forward
         t0 = time.time()
         out = net(images)
+        # print(f"[INFO] out: {out[2].shape}")
         # backprop
         optimizer.zero_grad()
         loss_l, loss_c = criterion(out, targets)
@@ -182,12 +184,12 @@ def train():
         loss.backward()
         optimizer.step()
         t1 = time.time()
-        loc_loss += loss_l.data[0]
-        conf_loss += loss_c.data[0]
+        loc_loss += loss_l.item()
+        conf_loss += loss_c.item()
 
         if iteration % 10 == 0:
             print('timer: %.4f sec.' % (t1 - t0))
-            print('iter ' + repr(iteration) + ' || Loss: %.4f ||' % (loss.data[0]), end=' ')
+            print('iter ' + repr(iteration) + ' || Loss_l: %.4f || Loss_c: %.4f ||' % (loss_l.item(), loss_c.item()), end=' ')
 
         if args.visdom:
             update_vis_plot(iteration, loss_l.data[0], loss_c.data[0],

@@ -1,8 +1,8 @@
 import torch
 import torch.nn as nn
 from collections import OrderedDict
-from nets.darknet import darknet53
-from nets.FSAnet import FSANet
+from darknet import darknet53
+from FSAnet import FSANet
 
 
 def conv2d(filter_in, filter_out, kernel_size):
@@ -62,7 +62,7 @@ class YoloBody(nn.Module):
         # layer for train yaw, pitch, roll
         # input shape bs x [256, 512, 1024] x [(52x52), (26x26), (13x13)]
         # output shape bs x 3 x 3 x [(52x52), (26x26), (13x13)]
-        self.num_primcaps = 5*3
+        self.num_primcaps = 3*3
         self.primcaps_dim = 8
         self.num_out_capsule = 3
         self.out_capsule_dim = 8
@@ -72,9 +72,9 @@ class YoloBody(nn.Module):
         self.cv2 = conv2d(out_filters[-3], out_filter_cv, 1)
         self.cv1 = conv2d(out_filters[-2], out_filter_cv, 1)
         self.cv0 = conv2d(out_filters[-1], out_filter_cv, 1)
-        self.FSAnet0 = FSANet(self.num_primcaps, self.primcaps_dim, self.num_out_capsule, self.out_capsule_dim, self.routings)
-        self.FSAnet1 = FSANet(self.num_primcaps, self.primcaps_dim, self.num_out_capsule, self.out_capsule_dim, self.routings)
-        self.FSAnet2 = FSANet(self.num_primcaps, self.primcaps_dim, self.num_out_capsule, self.out_capsule_dim, self.routings)
+        # self.FSAnet0 = FSANet(self.num_primcaps, self.primcaps_dim, self.num_out_capsule, self.out_capsule_dim, self.routings)
+        # self.FSAnet1 = FSANet(self.num_primcaps, self.primcaps_dim, self.num_out_capsule, self.out_capsule_dim, self.routings)
+        # self.FSAnet2 = FSANet(self.num_primcaps, self.primcaps_dim, self.num_out_capsule, self.out_capsule_dim, self.routings)
 
     def forward(self, x):
         def _branch(last_layer, layer_in):
@@ -107,43 +107,23 @@ class YoloBody(nn.Module):
 
         # train 3 head pose: yaw, pitch, roll
         pose0_branch = self.cv0(x0)
-        bs, c, w, h = pose0_branch.size()
-        anchors0_batch = bs*w*h*self.num_anchors
-        pose0_branch = pose0_branch.view(anchors0_batch, self.num_primcaps, self.primcaps_dim)
-        pose0_branch = self.FSAnet0(pose0_branch)
-        pose0_branch = pose0_branch.view(bs, self.num_anchors*self.num_out_capsule, w, h)
-
         pose1_branch = self.cv1(x1)
-        bs, c, w, h = pose1_branch.size()
-        anchors1_batch = bs*w*h*self.num_anchors
-        pose1_branch = pose1_branch.view(anchors1_batch, self.num_primcaps, self.primcaps_dim)
-        pose1_branch = self.FSAnet1(pose1_branch)
-        pose1_branch = pose1_branch.view(bs, self.num_anchors*self.num_out_capsule, w, h)
-
         pose2_branch = self.cv2(x2)
-        bs, c, w, h = pose2_branch.size()
-        anchors2_batch = bs*w*h*self.num_anchors
-        pose2_branch = pose2_branch.view(anchors2_batch, self.num_primcaps, self.primcaps_dim)
-        pose2_branch = self.FSAnet2(pose2_branch)
-        pose2_branch = pose2_branch.view(bs, self.num_anchors*self.num_out_capsule, w, h)
 
-        out0 = torch.cat((out0, pose0_branch), 1)
-        out1 = torch.cat((out1, pose1_branch), 1)
-        out2 = torch.cat((out2, pose2_branch), 1)
 
-        return out0, out1, out2
+        return (out0, pose0_branch), (out1, pose1_branch), (out2, pose2_branch)
 
 
 if __name__ == "__main__":
     import sys
     import os
-    sys.path.append('/data/hoang/version1.1/yolo3_multitask')
-    sys.path.append('/data/hoang/version1.1/yolo3_multitask/nets')
-    os.chdir("/data/hoang/version1.1/yolo3_multitask/nets")
+    sys.path.append('/media/2tb/Hoang/multitask/code/yolo3_fsanet')
+    sys.path.append('/media/2tb/Hoang/multitask/code/yolo3_fsanet/nets')
+    os.chdir("/media/2tb/Hoang/multitask/code/yolo3_fsanet/nets")
     from utils.config import Config
     model = YoloBody(Config)
     print(model)
     x = torch.zeros((1, 3, 416, 416))
     y = model(x)
-    print(y[0].shape)
-    print(y[1].shape)
+    print(y[0][0].shape)
+    print(y[0][1].shape)

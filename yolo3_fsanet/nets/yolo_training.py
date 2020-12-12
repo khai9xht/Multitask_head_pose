@@ -5,52 +5,8 @@ import torch
 import torch.nn as nn
 import math
 import torch.nn.functional as F
-from matplotlib.colors import rgb_to_hsv, hsv_to_rgb
 from PIL import Image
-from utils.utils import bbox_iou
-
-
-def jaccard(_box_a, _box_b):
-    b1_x1, b1_x2 = _box_a[:, 0] - _box_a[:, 2] / \
-        2, _box_a[:, 0] + _box_a[:, 2] / 2
-    b1_y1, b1_y2 = _box_a[:, 1] - _box_a[:, 3] / \
-        2, _box_a[:, 1] + _box_a[:, 3] / 2
-    b2_x1, b2_x2 = _box_b[:, 0] - _box_b[:, 2] / \
-        2, _box_b[:, 0] + _box_b[:, 2] / 2
-    b2_y1, b2_y2 = _box_b[:, 1] - _box_b[:, 3] / \
-        2, _box_b[:, 1] + _box_b[:, 3] / 2
-    box_a = torch.zeros_like(_box_a)
-    box_b = torch.zeros_like(_box_b)
-    box_a[:, 0], box_a[:, 1], box_a[:, 2], box_a[:,
-                                                 3] = b1_x1, b1_y1, b1_x2, b1_y2
-    box_b[:, 0], box_b[:, 1], box_b[:, 2], box_b[:,
-                                                 3] = b2_x1, b2_y1, b2_x2, b2_y2
-    A = box_a.size(0)
-    B = box_b.size(0)
-    max_xy = torch.min(box_a[:, 2:].unsqueeze(1).expand(A, B, 2),
-                       box_b[:, 2:].unsqueeze(0).expand(A, B, 2))
-    min_xy = torch.max(box_a[:, :2].unsqueeze(1).expand(A, B, 2),
-                       box_b[:, :2].unsqueeze(0).expand(A, B, 2))
-    inter = torch.clamp((max_xy - min_xy), min=0)
-
-    inter = inter[:, :, 0] * inter[:, :, 1]
-    # calculate area of boxes
-    area_a = ((box_a[:, 2]-box_a[:, 0]) *
-              (box_a[:, 3]-box_a[:, 1])).unsqueeze(1).expand_as(inter)  # [A,B]
-    area_b = ((box_b[:, 2]-box_b[:, 0]) *
-              (box_b[:, 3]-box_b[:, 1])).unsqueeze(0).expand_as(inter)  # [A,B]
-    # calculate IOU
-    union = area_a + area_b - inter
-    return inter / union  # [A,B]
-
-
-def clip_by_tensor(t, t_min, t_max):
-    t = t.float()
-
-    result = (t >= t_min).float() * t + (t < t_min).float() * t_min
-    result = (result <= t_max).float() * result + \
-        (result > t_max).float() * t_max
-    return result
+from utils.utils import bbox_iou, jaccard, clip_by_tensor
 
 
 def MSELoss(pred, target):
@@ -86,10 +42,19 @@ class YOLOLoss(nn.Module):
         self.lambda_roll = 1.0
         self.cuda = cuda
 
+        self.num_primcaps = 3*3
+        self.primcaps_dim = 8
+        self.num_out_capsule = 3
+        self.out_capsule_dim = 8
+        self.routings = 2
+        self.num_anchors = 3
+
+        self.FSAnet = FSANet(self.num_primcaps, self.primcaps_dim, self.num_out_capsule, self.out_capsule_dim, self.routings)
+
     def forward(self, input, targets=None):
-        # input shape: bs,(3*(5+num_classes)+3*3),13,13
-        input_boxes = input[:,:-3*3,:,:]
-        input_poses = input[:,-3*3:,:,:]
+        # input shape: [(bs,(3*(5+num_classes)),13,13), (bs*13*13*anchors, num_primcaps, primcaps_dim)]
+        input_boxes = input[0]
+        input_poses = input[1]
         # print(f"[INFO] input_boxes: {input_boxes.shape}")
         # print(f"[INFO] input_poses: {input_poses.shape}")
 
@@ -110,9 +75,9 @@ class YOLOLoss(nn.Module):
         box_prediction = input_boxes.view(bs, int(self.num_anchors/3),
                                 self.bbox_attrs, in_h, in_w).permute(0, 1, 3, 4, 2).contiguous()
 
-        # bs,3*num_poses,13,13 -> bs,3,13,13,num_poses
-        pose_prediction = input_poses.view(bs, int(self.num_anchors/3),
-                                self.num_poses, in_h, in_w).permute(0, 1, 3, 4, 2).contiguous()
+        # # bs,3*num_poses,13,13 -> bs,3,13,13,num_poses
+        # pose_prediction = input_poses.view(bs, int(self.num_anchors/3),
+        #                         self.num_poses, in_h, in_w).permute(0, 1, 3, 4, 2).contiguous()
 
 
         x = torch.sigmoid(box_prediction[..., 0])  # Center x
@@ -122,9 +87,9 @@ class YOLOLoss(nn.Module):
         conf = torch.sigmoid(box_prediction[..., 4])  # Conf
         pred_cls = torch.sigmoid(box_prediction[..., 5:5+self.num_classes])
 
-        pred_yaw = torch.cuda.FloatTensor(pose_prediction[..., 0])
-        pred_pitch = torch.cuda.FloatTensor(pose_prediction[..., 1])
-        pred_roll = torch.cuda.FloatTensor(pose_prediction[..., 2])
+        # pred_yaw = torch.cuda.FloatTensor(pose_prediction[..., 0])
+        # pred_pitch = torch.cuda.FloatTensor(pose_prediction[..., 1])
+        # pred_roll = torch.cuda.FloatTensor(pose_prediction[..., 2])
 
         # calculate ground truth from targets
         mask, noobj_mask, tx, ty, tw, th, tconf, tcls, yaw, pitch, roll, box_loss_scale_x, box_loss_scale_y =\
@@ -134,6 +99,9 @@ class YOLOLoss(nn.Module):
 
         noobj_mask = self.get_ignore(
             box_prediction, targets, scaled_anchors, in_w, in_h, noobj_mask)
+
+        
+
         if self.cuda:
             box_loss_scale_x = (box_loss_scale_x).cuda()
             box_loss_scale_y = (box_loss_scale_y).cuda()

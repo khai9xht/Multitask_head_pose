@@ -1,6 +1,3 @@
-#-------------------------------------#
-#       对数据集进行训练
-#-------------------------------------#
 import os
 import numpy as np
 import time
@@ -24,7 +21,7 @@ def get_lr(optimizer):
     for param_group in optimizer.param_groups:
         return param_group['lr']
 
-def fit_ont_epoch(net,yolo_losses,epoch,epoch_size,epoch_size_val,gen,genval,Epoch,cuda,writer):
+def fit_ont_epoch(net,yolo_losses,epoch,epoch_size,epoch_size_val,gen,genval,Epoch,cuda,writer=None):
     total_loss = 0
     val_loss = 0
     start_time = time.time()
@@ -47,14 +44,15 @@ def fit_ont_epoch(net,yolo_losses,epoch,epoch_size,epoch_size_val,gen,genval,Epo
                 loss_item = yolo_losses[i](outputs[i], targets)
                 losses.append(loss_item[0])
                 idx = iteration + epoch * epoch_size
-                writer.add_scalar("Loss_x", loss_item[1], idx)
-                writer.add_scalar("Loss_y", loss_item[2], idx)
-                writer.add_scalar("Loss_w", loss_item[3], idx)
-                writer.add_scalar("Loss_h", loss_item[4], idx)
-                writer.add_scalar("Loss_conf", loss_item[5], idx)
-                writer.add_scalar("Loss_yaw", loss_item[6], idx)
-                writer.add_scalar("Loss_pitch", loss_item[7], idx)
-                writer.add_scalar("Loss_roll", loss_item[8], idx)
+                if writer != None:
+                    writer.add_scalar("Loss_x", loss_item[1], idx)
+                    writer.add_scalar("Loss_y", loss_item[2], idx)
+                    writer.add_scalar("Loss_w", loss_item[3], idx)
+                    writer.add_scalar("Loss_h", loss_item[4], idx)
+                    writer.add_scalar("Loss_conf", loss_item[5], idx)
+                    writer.add_scalar("Loss_yaw", loss_item[6], idx)
+                    writer.add_scalar("Loss_pitch", loss_item[7], idx)
+                    writer.add_scalar("Loss_roll", loss_item[8], idx)
 
             loss = sum(losses)
             loss.backward()
@@ -98,7 +96,7 @@ def fit_ont_epoch(net,yolo_losses,epoch,epoch_size,epoch_size_val,gen,genval,Epo
     print('Finish Validation')
     print('Epoch:'+ str(epoch+1) + '/' + str(Epoch))
     print('Total Loss: %.4f || Val Loss: %.4f ' % (total_loss/(epoch_size+1),val_loss/(epoch_size_val+1)))
-    log_dir = "/media/2tb/Hoang/multitask/runs/training"
+    log_dir = "/media/2tb/Hoang/multitask/logs/training"
 
     torch.save(model.state_dict(), log_dir+'/Epoch%d-Total_Loss%.4f-Val_Loss%.4f.pth'%((epoch+1),total_loss/(epoch_size+1),val_loss/(epoch_size_val+1)))
 
@@ -159,7 +157,7 @@ if __name__ == "__main__":
     #------------------------------------------------------#
     if True:
         lr = 1e-3
-        Batch_size = 32
+        Batch_size = 64
         Init_Epoch = 0
         Freeze_Epoch = 30
 
@@ -193,7 +191,7 @@ if __name__ == "__main__":
 
     if True:
         lr = 1e-4
-        Batch_size = 8
+        Batch_size = 32
         Freeze_Epoch = 50
         Unfreeze_Epoch = 100
 
