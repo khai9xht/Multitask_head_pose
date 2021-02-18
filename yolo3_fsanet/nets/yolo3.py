@@ -1,8 +1,8 @@
 import torch
 import torch.nn as nn
 from collections import OrderedDict
-from darknet import darknet53
-from FSAnet import FSANet
+from nets.darknet import darknet53
+
 
 
 def conv2d(filter_in, filter_out, kernel_size):
@@ -62,8 +62,8 @@ class YoloBody(nn.Module):
         # layer for train yaw, pitch, roll
         # input shape bs x [256, 512, 1024] x [(52x52), (26x26), (13x13)]
         # output shape bs x 3 x 3 x [(52x52), (26x26), (13x13)]
-        self.num_primcaps = 3*3
-        self.primcaps_dim = 8
+        self.num_primcaps = 5*3
+        self.primcaps_dim = 16
         self.num_out_capsule = 3
         self.out_capsule_dim = 8
         self.routings = 2
@@ -72,10 +72,7 @@ class YoloBody(nn.Module):
         self.cv2 = conv2d(out_filters[-3], out_filter_cv, 1)
         self.cv1 = conv2d(out_filters[-2], out_filter_cv, 1)
         self.cv0 = conv2d(out_filters[-1], out_filter_cv, 1)
-        # self.FSAnet0 = FSANet(self.num_primcaps, self.primcaps_dim, self.num_out_capsule, self.out_capsule_dim, self.routings)
-        # self.FSAnet1 = FSANet(self.num_primcaps, self.primcaps_dim, self.num_out_capsule, self.out_capsule_dim, self.routings)
-        # self.FSAnet2 = FSANet(self.num_primcaps, self.primcaps_dim, self.num_out_capsule, self.out_capsule_dim, self.routings)
-
+       
     def forward(self, x):
         def _branch(last_layer, layer_in):
             out_branch = None

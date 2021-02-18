@@ -19,7 +19,7 @@ from torch.utils.tensorboard import SummaryWriter
 
 def get_lr(optimizer):
     for param_group in optimizer.param_groups:
-        return param_group['lr']
+        return param_linesgroup['lr']
 
 def fit_ont_epoch(net,yolo_losses,epoch,epoch_size,epoch_size_val,gen,genval,Epoch,cuda,writer=None):
     total_loss = 0
@@ -44,15 +44,14 @@ def fit_ont_epoch(net,yolo_losses,epoch,epoch_size,epoch_size_val,gen,genval,Epo
                 loss_item = yolo_losses[i](outputs[i], targets)
                 losses.append(loss_item[0])
                 idx = iteration + epoch * epoch_size
-                if writer != None:
-                    writer.add_scalar("Loss_x", loss_item[1], idx)
-                    writer.add_scalar("Loss_y", loss_item[2], idx)
-                    writer.add_scalar("Loss_w", loss_item[3], idx)
-                    writer.add_scalar("Loss_h", loss_item[4], idx)
-                    writer.add_scalar("Loss_conf", loss_item[5], idx)
-                    writer.add_scalar("Loss_yaw", loss_item[6], idx)
-                    writer.add_scalar("Loss_pitch", loss_item[7], idx)
-                    writer.add_scalar("Loss_roll", loss_item[8], idx)
+                writer.add_scalar("Loss_x", loss_item[1], idx)
+                writer.add_scalar("Loss_y", loss_item[2], idx)
+                writer.add_scalar("Loss_w", loss_item[3], idx)
+                writer.add_scalar("Loss_h", loss_item[4], idx)
+                writer.add_scalar("Loss_conf", loss_item[5], idx)
+                writer.add_scalar("Loss_yaw", loss_item[6], idx)
+                writer.add_scalar("Loss_pitch", loss_item[7], idx)
+                writer.add_scalar("Loss_roll", loss_item[8], idx)
 
             loss = sum(losses)
             loss.backward()
@@ -84,13 +83,7 @@ def fit_ont_epoch(net,yolo_losses,epoch,epoch_size,epoch_size_val,gen,genval,Epo
                     targets_val = [Variable(torch.from_numpy(ann).type(torch.FloatTensor)) for ann in targets_val]
                 optimizer.zero_grad()
                 outputs = net(images_val)
-                losses = []
-                for i in range(3):
-                    loss_item = yolo_losses[i](outputs[i], targets_val)
-                    losses.append(loss_item[0])
-                loss = sum(losses)
-                val_loss += loss
-            pbar.set_postfix(**{'total_loss': val_loss.item() / (iteration + 1)})
+                losseslinesostfix(**{'total_loss': val_loss.item() / (iteration + 1)})
             pbar.update(1)
 
     print('Finish Validation')

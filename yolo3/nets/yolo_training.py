@@ -61,6 +61,13 @@ def BCELoss(pred, target):
     output = -target * torch.log(pred) - (1.0 - target) * torch.log(1.0 - pred)
     return output
 
+def wrapped_loss(pred, target):
+    loss_1 = torch.abs(pred - target)**2
+    loss_2 = (360 - torch.abs(pred - target))**2
+    loss = torch.mean(torch.min(loss_1. loss_2), axis=0)
+    return loss
+
+
 
 class YOLOLoss(nn.Module):
     def __init__(self, anchors, num_classes, img_size, cuda):
@@ -69,8 +76,7 @@ class YOLOLoss(nn.Module):
         self.num_anchors = len(anchors)
         self.num_classes = num_classes
         self.bbox_attrs = 5 + num_classes
-        self.feature_length = [img_size[0]//32,
-                               img_size[0]//16, img_size[0]//8]
+        self.feature_length = [img_size[0]//32, img_size[0]//16, img_size[0]//8]
         self.img_size = img_size
 
         self.ignore_threshold = 0.5

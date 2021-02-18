@@ -7,7 +7,7 @@ import math
 import torch.nn.functional as F
 from PIL import Image
 from utils.utils import bbox_iou, jaccard, clip_by_tensor
-
+from nets.FSAnet import FSANet
 
 def MSELoss(pred, target):
     return (pred-target)**2
@@ -33,23 +33,21 @@ class YOLOLoss(nn.Module):
         self.img_size = img_size
 
         self.ignore_threshold = 0.5
-        self.lambda_xy = 1.0
-        self.lambda_wh = 1.0
-        self.lambda_conf = 1
-        self.lambda_cls = 1.0
-        self.lambda_yaw = 1.0
-        self.lambda_pitch = 1.0
-        self.lambda_roll = 1.0
+        self.lambda_bbox_attrs = 0.5
+        self.lambda_xy = 0.3
+        self.lambda_wh = 0.3
+        self.lambda_conf = 0.2
+        self.lambda_cls = 0.2
+        self.lambda_pose = 1- self.lambda_bbox_attrs
         self.cuda = cuda
 
-        self.num_primcaps = 3*3
-        self.primcaps_dim = 8
+        self.num_primcaps = 5*3
+        self.primcaps_dim = 16
         self.num_out_capsule = 3
         self.out_capsule_dim = 8
         self.routings = 2
-        self.num_anchors = 3
 
-        self.FSAnet = FSANet(self.num_primcaps, self.primcaps_dim, self.num_out_capsule, self.out_capsule_dim, self.routings)
+        self.FSAnet = FSANet(self.num_primcaps, self.primcaps_dim, self.num_out_capsule, self.out_capsule_dim, self.routings).cuda()
 
     def forward(self, input, targets=None):
         # input shape: [(bs,(3*(5+num_classes)),13,13), (bs*13*13*anchors, num_primcaps, primcaps_dim)]
@@ -72,13 +70,13 @@ class YOLOLoss(nn.Module):
                           for a_w, a_h in self.anchors]
 
         # bs,3*(5+num_classes),13,13 -> bs,3,13,13,(5+num_classes)
-        box_prediction = input_boxes.view(bs, int(self.num_anchors/3),
-                                self.bbox_attrs, in_h, in_w).permute(0, 1, 3, 4, 2).contiguous()
+        box_prediction = input_boxes.view(bs, int(self.num_anchors/3),\
+         self.bbox_attrs, in_h, in_w).permute(0, 1, 3, 4, 2).contiguous()
 
         # # bs,3*num_poses,13,13 -> bs,3,13,13,num_poses
-        # pose_prediction = input_poses.view(bs, int(self.num_anchors/3),
-        #                         self.num_poses, in_h, in_w).permute(0, 1, 3, 4, 2).contiguous()
-
+        input_poses = input_poses.view(bs, int(self.num_anchors/3),\
+         self.num_primcaps, self.primcaps_dim, in_h, in_w).permute(0, 1, 4, 5, 2, 3).contiguous()
+        # print(f"[INFO] input_poses: {input_poses.shape}")
 
         x = torch.sigmoid(box_prediction[..., 0])  # Center x
         y = torch.sigmoid(box_prediction[..., 1])  # Center y
@@ -86,10 +84,6 @@ class YOLOLoss(nn.Module):
         h = box_prediction[..., 3]  # Height
         conf = torch.sigmoid(box_prediction[..., 4])  # Conf
         pred_cls = torch.sigmoid(box_prediction[..., 5:5+self.num_classes])
-
-        # pred_yaw = torch.cuda.FloatTensor(pose_prediction[..., 0])
-        # pred_pitch = torch.cuda.FloatTensor(pose_prediction[..., 1])
-        # pred_roll = torch.cuda.FloatTensor(pose_prediction[..., 2])
 
         # calculate ground truth from targets
         mask, noobj_mask, tx, ty, tw, th, tconf, tcls, yaw, pitch, roll, box_loss_scale_x, box_loss_scale_y =\
@@ -99,8 +93,20 @@ class YOLOLoss(nn.Module):
 
         noobj_mask = self.get_ignore(
             box_prediction, targets, scaled_anchors, in_w, in_h, noobj_mask)
-
+        # print(f"[INFO] mask: {mask.shape}")
         
+        grid_poses = torch.zeros((bs, int(self.num_anchors/3), in_h, in_w, self.num_poses)).cuda()
+        input_poses_obj = input_poses[mask>0]
+        # print(f"[INFO] input_poses_obj: {input_poses_obj.shape}")
+        if input_poses_obj.size(0) != 0:
+            FSA_pred = self.FSAnet(input_poses_obj)
+            grid_poses[mask==1] = FSA_pred
+
+
+
+        pred_yaw = torch.cuda.FloatTensor(grid_poses[..., 0])
+        pred_pitch = torch.cuda.FloatTensor(grid_poses[..., 1])
+        pred_roll = torch.cuda.FloatTensor(grid_poses[..., 2])
 
         if self.cuda:
             box_loss_scale_x = (box_loss_scale_x).cuda()
@@ -128,28 +134,28 @@ class YOLOLoss(nn.Module):
         loss_pitch = torch.sum(MSELoss(pred_pitch, pitch)/bs * mask)
         loss_roll = torch.sum(MSELoss(pred_roll, roll)/bs * mask)
 
-        print(f'[INFO] loss_x: {loss_x.device}')
-        print(f'[INFO] loss_y: {loss_y.device}')
-        print(f'[INFO] loss_w: {loss_w.device}')
-        print(f'[INFO] loss_h: {loss_h.device}')
-        print(f'[INFO] conf: {conf[0].device}')
-        print(f'[INFO] mask: {mask[0].device}')
-        print(f'[INFO] loss_conf: {loss_conf.device}')
-        print(f'[INFO] box_loss_scale_x: {box_loss_scale_x.device}')
+        # print(f'[INFO] loss_x: {loss_x.device}')
+        # print(f'[INFO] loss_y: {loss_y.device}')
+        # print(f'[INFO] loss_w: {loss_w.device}')
+        # print(f'[INFO] loss_h: {loss_h.device}')
+        # print(f'[INFO] conf: {conf[0].device}')
+        # print(f'[INFO] mask: {mask[0].device}')
+        # print(f'[INFO] loss_conf: {loss_conf.device}')
+        # print(f'[INFO] box_loss_scale_x: {box_loss_scale_x.device}')
 
-        print(f'[INFO] box_loss_scale_y: {box_loss_scale_y.device}')
-        print(f'[INFO] box_loss_scale: {box_loss_scale.device}')
-        print(f'[INFO] loss_yaw: {loss_yaw.device}')
-        print(f'[INFO] loss_pitch: {loss_pitch.device}')
-        print(f'[INFO] loss_roll: {loss_roll.device}')
+        # print(f'[INFO] box_loss_scale_y: {box_loss_scale_y.device}')
+        # print(f'[INFO] box_loss_scale: {box_loss_scale.device}')
+        # print(f'[INFO] loss_yaw: {loss_yaw.device}')
+        # print(f'[INFO] loss_pitch: {loss_pitch.device}')
+        # print(f'[INFO] loss_roll: {loss_roll.device}')
 
+        loss = ((loss_x + loss_y) * self.lambda_xy +\
+         (loss_w + loss_h) * self.lambda_wh +\
+          loss_conf * self.lambda_conf + loss_cls * self.lambda_cls) * self.lambda_bbox_attrs + (loss_yaw + loss_pitch + loss_roll) * self.lambda_pose
 
-        loss = loss_x * self.lambda_xy + loss_y * self.lambda_xy + \
-            loss_w * self.lambda_wh + loss_h * self.lambda_wh + \
-            loss_conf * self.lambda_conf + loss_cls * self.lambda_cls +\
-            loss_yaw * self.lambda_yaw + loss_pitch * self.lambda_pitch + loss_roll * self.lambda_roll
         return loss, loss_x.item(), loss_y.item(), loss_w.item(), \
-            loss_h.item(), loss_conf.item(), loss_cls.item(), loss_yaw.item(), loss_pitch.item(), loss_roll.item()
+            loss_h.item(), loss_conf.item(), loss_cls.item(), \
+            loss_yaw.item(), loss_pitch.item(), loss_roll.item()
 
     def get_target(self, target, anchors, in_w, in_h, ignore_threshold):
         # print(f'[INFO] target: {target[0].shape}')
@@ -193,7 +199,7 @@ class YOLOLoss(nn.Module):
                 continue
 
             # rescale
-            gxs = target[b][:, 0:1] * in_w
+            gxs = target[b][:, 0:1] * in_w 
             gys = target[b][:, 1:2] * in_h
 
             gws = target[b][:, 2:3] * in_w
@@ -206,7 +212,7 @@ class YOLOLoss(nn.Module):
                 torch.cat([torch.zeros_like(gws), torch.zeros_like(ghs), gws, ghs], 1))
 
             anchor_shapes = torch.cuda.FloatTensor(
-                torch.cat((torch.zeros((self.num_anchors, 2)).cuda(), torch.FloatTensor(anchors)), 1))
+                torch.cat((torch.zeros((self.num_anchors, 2)).cuda(), torch.cuda.FloatTensor(anchors)), 1))
 
             anch_ious = jaccard(gt_box, anchor_shapes)
 

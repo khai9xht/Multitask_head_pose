@@ -1,173 +1,279 @@
-# SSD: Single Shot MultiBox Object Detector, in PyTorch
-A [PyTorch](http://pytorch.org/) implementation of [Single Shot MultiBox Detector](http://arxiv.org/abs/1512.02325) from the 2016 paper by Wei Liu, Dragomir Anguelov, Dumitru Erhan, Christian Szegedy, Scott Reed, Cheng-Yang, and Alexander C. Berg.  The official and original Caffe code can be found [here](https://github.com/weiliu89/caffe/tree/ssd).
+# Single Shot MultiBox Detector Implementation in Pytorch
 
+This repo implements [SSD (Single Shot MultiBox Detector)](https://arxiv.org/abs/1512.02325). The implementation is heavily influenced by the projects [ssd.pytorch](https://github.com/amdegroot/ssd.pytorch) and [Detectron](https://github.com/facebookresearch/Detectron).
+The design goal is modularity and extensibility.
 
-<img align="right" src= "https://github.com/amdegroot/ssd.pytorch/blob/master/doc/ssd.png" height = 400/>
+Currently, it has MobileNetV1, MobileNetV2, and VGG based SSD/SSD-Lite implementations. 
 
-### Table of Contents
-- <a href='#installation'>Installation</a>
-- <a href='#datasets'>Datasets</a>
-- <a href='#training-ssd'>Train</a>
-- <a href='#evaluation'>Evaluate</a>
-- <a href='#performance'>Performance</a>
-- <a href='#demos'>Demos</a>
-- <a href='#todo'>Future Work</a>
-- <a href='#references'>Reference</a>
+It also has out-of-box support for retraining on Google Open Images dataset.
 
-&nbsp;
-&nbsp;
-&nbsp;
-&nbsp;
+![Example of Mobile SSD](readme_ssd_example.jpg  "Example of Mobile SSD(Courtesy of https://www.pexels.com/@mirit-assaf-299757 for the image.")
 
-## Installation
-- Install [PyTorch](http://pytorch.org/) by selecting your environment on the website and running the appropriate command.
-- Clone this repository.
-  * Note: We currently only support Python 3+.
-- Then download the dataset by following the [instructions](#datasets) below.
-- We now support [Visdom](https://github.com/facebookresearch/visdom) for real-time loss visualization during training!
-  * To use Visdom in the browser:
-  ```Shell
-  # First install Python server and client
-  pip install visdom
-  # Start the server (probably in a screen or tmux)
-  python -m visdom.server
-  ```
-  * Then (during training) navigate to http://localhost:8097/ (see the Train section below for training details).
-- Note: For training, we currently support [VOC](http://host.robots.ox.ac.uk/pascal/VOC/) and [COCO](http://mscoco.org/), and aim to add [ImageNet](http://www.image-net.org/) support soon.
+## Dependencies
+1. Python 3.6+
+2. OpenCV
+3. Pytorch 1.0 or Pytorch 0.4+
+4. Caffe2
+5. Pandas
+6. Boto3 if you want to train models on the Google OpenImages Dataset.
 
-## Datasets
-To make things easy, we provide bash scripts to handle the dataset downloads and setup for you.  We also provide simple dataset loaders that inherit `torch.utils.data.Dataset`, making them fully compatible with the `torchvision.datasets` [API](http://pytorch.org/docs/torchvision/datasets.html).
+## Run the demo
+### Run the live MobilenetV1 SSD demo
 
+```bash
+wget -P models https://storage.googleapis.com/models-hao/mobilenet-v1-ssd-mp-0_675.pth
+wget -P models https://storage.googleapis.com/models-hao/voc-model-labels.txt
+python run_ssd_live_demo.py mb1-ssd models/mobilenet-v1-ssd-mp-0_675.pth models/voc-model-labels.txt 
+```
+### Run the live demo in Caffe2
 
-### COCO
-Microsoft COCO: Common Objects in Context
-
-##### Download COCO 2014
-```Shell
-# specify a directory for dataset to be downloaded into, else default is ~/data/
-sh data/scripts/COCO2014.sh
+```bash
+wget -P models https://storage.googleapis.com/models-hao/mobilenet_v1_ssd_caffe2/mobilenet-v1-ssd_init_net.pb
+wget -P models https://storage.googleapis.com/models-hao/mobilenet_v1_ssd_caffe2/mobilenet-v1-ssd_predict_net.pb
+python run_ssd_live_caffe2.py models/mobilenet-v1-ssd_init_net.pb models/mobilenet-v1-ssd_predict_net.pb models/voc-model-labels.txt 
 ```
 
-### VOC Dataset
-PASCAL VOC: Visual Object Classes
+You can see a decent speed boost by using Caffe2.
 
-##### Download VOC2007 trainval & test
-```Shell
-# specify a directory for dataset to be downloaded into, else default is ~/data/
-sh data/scripts/VOC2007.sh # <directory>
+### Run the live MobileNetV2 SSD Lite demo
+
+```bash
+wget -P models https://storage.googleapis.com/models-hao/mb2-ssd-lite-mp-0_686.pth
+wget -P models https://storage.googleapis.com/models-hao/voc-model-labels.txt
+python run_ssd_live_demo.py mb2-ssd-lite models/mb2-ssd-lite-mp-0_686.pth models/voc-model-labels.txt 
 ```
 
-##### Download VOC2012 trainval
-```Shell
-# specify a directory for dataset to be downloaded into, else default is ~/data/
-sh data/scripts/VOC2012.sh # <directory>
+The above MobileNetV2 SSD-Lite model is not ONNX-Compatible, as it uses Relu6 which is not supported by ONNX.
+The code supports the ONNX-Compatible version. Once I have trained a good enough MobileNetV2 model with Relu, I will upload
+the corresponding Pytorch and Caffe2 models.
+
+You may notice MobileNetV2 SSD/SSD-Lite is slower than MobileNetV1 SSD/Lite on PC. However, MobileNetV2 is faster on mobile devices.
+
+## Pretrained Models
+
+### Mobilenet V1 SSD
+
+URL: https://storage.googleapis.com/models-hao/mobilenet-v1-ssd-mp-0_675.pth
+
+```
+Average Precision Per-class:
+aeroplane: 0.6742489426027927
+bicycle: 0.7913672875238116
+bird: 0.612096015101108
+boat: 0.5616407126931772
+bottle: 0.3471259064860268
+bus: 0.7742298893362103
+car: 0.7284171192326804
+cat: 0.8360675520354323
+chair: 0.5142295855384792
+cow: 0.6244090341627014
+diningtable: 0.7060035669312754
+dog: 0.7849252606216821
+horse: 0.8202146617282785
+motorbike: 0.793578272243471
+person: 0.7042670984734087
+pottedplant: 0.40257147509774405
+sheep: 0.6071252282334352
+sofa: 0.7549120254763918
+train: 0.8270992920206008
+tvmonitor: 0.6459903029666852
+
+Average Precision Across All Classes:0.6755
 ```
 
-## Training SSD
-- First download the fc-reduced [VGG-16](https://arxiv.org/abs/1409.1556) PyTorch base network weights at:              https://s3.amazonaws.com/amdegroot-models/vgg16_reducedfc.pth
-- By default, we assume you have downloaded the file in the `ssd.pytorch/weights` dir:
+### MobileNetV2 SSD-Lite
 
-```Shell
-mkdir weights
-cd weights
-wget https://s3.amazonaws.com/amdegroot-models/vgg16_reducedfc.pth
+URL: https://storage.googleapis.com/models-hao/mb2-ssd-lite-mp-0_686.pth
+
+```
+Average Precision Per-class:
+aeroplane: 0.6973327307871002
+bicycle: 0.7823755921687233
+bird: 0.6342429230125619
+boat: 0.5478160937380846
+bottle: 0.3564069147093762
+bus: 0.7882037885117419
+car: 0.7444122242934775
+cat: 0.8198865557991936
+chair: 0.5378973422880109
+cow: 0.6186076149254742
+diningtable: 0.7369559500950861
+dog: 0.7848265495754562
+horse: 0.8222948787839229
+motorbike: 0.8057808854619948
+person: 0.7176976451996411
+pottedplant: 0.42802932547480066
+sheep: 0.6259124005994047
+sofa: 0.7840368059271103
+train: 0.8331588002612781
+tvmonitor: 0.6555051795079904
+Average Precision Across All Classes:0.6860690100560214
 ```
 
-- To train SSD using the train script simply specify the parameters listed in `train.py` as a flag or manually change them.
+The code to re-produce the model:
 
-```Shell
-python train.py
+```bash
+wget -P models https://storage.googleapis.com/models-hao/mb2-imagenet-71_8.pth
+python train_ssd.py --dataset_type voc  --datasets ~/data/VOC0712/VOC2007 ~/data/VOC0712/VOC2012 --validation_dataset ~/data/VOC0712/test/VOC2007/ --net mb2-ssd-lite --base_net models/mb2-imagenet-71_8.pth  --scheduler cosine --lr 0.01 --t_max 200 --validation_epochs 5 --num_epochs 200
 ```
 
-- Note:
-  * For training, an NVIDIA GPU is strongly recommended for speed.
-  * For instructions on Visdom usage/installation, see the <a href='#installation'>Installation</a> section.
-  * You can pick-up training from a checkpoint by specifying the path as one of the training parameters (again, see `train.py` for options)
+### VGG SSD
+
+URL: https://storage.googleapis.com/models-hao/vgg16-ssd-mp-0_7726.pth
+
+
+```
+Average Precision Per-class:
+aeroplane: 0.7957406334737802
+bicycle: 0.8305351156180996
+bird: 0.7570969203281721
+boat: 0.7043869846367731
+bottle: 0.5151666571756393
+bus: 0.8375121237865507
+car: 0.8581508869699901
+cat: 0.8696185705648963
+chair: 0.6165431194526735
+cow: 0.8066422244852381
+diningtable: 0.7629391213959706
+dog: 0.8444541531856452
+horse: 0.8691922094815812
+motorbike: 0.8496564646906418
+person: 0.793785185549561
+pottedplant: 0.5233462463152305
+sheep: 0.7786762429478917
+sofa: 0.8024887701948746
+train: 0.8713861172265407
+tvmonitor: 0.7650514925384194
+Average Precision Across All Classes:0.7726184620009084
+```
+
+The code to re-produce the model:
+
+```bash
+wget -P models https://s3.amazonaws.com/amdegroot-models/vgg16_reducedfc.pth
+python train_ssd.py --datasets ~/data/VOC0712/VOC2007/ ~/data/VOC0712/VOC2012/ --validation_dataset ~/data/VOC0712/test/VOC2007/ --net vgg16-ssd --base_net models/vgg16_reducedfc.pth  --batch_size 24 --num_epochs 200 --scheduler "multi-step” —-milestones “120,160”
+```
+## Training
+
+```bash
+wget -P models https://storage.googleapis.com/models-hao/mobilenet_v1_with_relu_69_5.pth
+python train_ssd.py --datasets ~/data/VOC0712/VOC2007/ ~/data/VOC0712/VOC2012/ --validation_dataset ~/data/VOC0712/test/VOC2007/ --net mb1-ssd --base_net models/mobilenet_v1_with_relu_69_5.pth  --batch_size 24 --num_epochs 200 --scheduler cosine --lr 0.01 --t_max 200
+```
+
+
+The dataset path is the parent directory of the folders: Annotations, ImageSets, JPEGImages, SegmentationClass and SegmentationObject. You can use multiple datasets to train.
+
 
 ## Evaluation
-To evaluate a trained network:
 
-```Shell
-python eval.py
+```bash
+python eval_ssd.py --net mb1-ssd  --dataset ~/data/VOC0712/test/VOC2007/ --trained_model models/mobilenet-v1-ssd-mp-0_675.pth --label_file models/voc-model-labels.txt 
 ```
 
-You can specify the parameters listed in the `eval.py` file by flagging them or manually changing them.  
+## Convert models to ONNX and Caffe2 models
 
-
-<img align="left" src= "https://github.com/amdegroot/ssd.pytorch/blob/master/doc/detection_examples.png">
-
-## Performance
-
-#### VOC2007 Test
-
-##### mAP
-
-| Original | Converted weiliu89 weights | From scratch w/o data aug | From scratch w/ data aug |
-|:-:|:-:|:-:|:-:|
-| 77.2 % | 77.26 % | 58.12% | 77.43 % |
-
-##### FPS
-**GTX 1060:** ~45.45 FPS
-
-## Demos
-
-### Use a pre-trained SSD network for detection
-
-#### Download a pre-trained network
-- We are trying to provide PyTorch `state_dicts` (dict of weight tensors) of the latest SSD model definitions trained on different datasets.  
-- Currently, we provide the following PyTorch models:
-    * SSD300 trained on VOC0712 (newest PyTorch weights)
-      - https://s3.amazonaws.com/amdegroot-models/ssd300_mAP_77.43_v2.pth
-    * SSD300 trained on VOC0712 (original Caffe weights)
-      - https://s3.amazonaws.com/amdegroot-models/ssd_300_VOC0712.pth
-- Our goal is to reproduce this table from the [original paper](http://arxiv.org/abs/1512.02325)
-<p align="left">
-<img src="http://www.cs.unc.edu/~wliu/papers/ssd_results.png" alt="SSD results on multiple datasets" width="800px"></p>
-
-### Try the demo notebook
-- Make sure you have [jupyter notebook](http://jupyter.readthedocs.io/en/latest/install.html) installed.
-- Two alternatives for installing jupyter notebook:
-    1. If you installed PyTorch with [conda](https://www.continuum.io/downloads) (recommended), then you should already have it.  (Just  navigate to the ssd.pytorch cloned repo and run):
-    `jupyter notebook`
-
-    2. If using [pip](https://pypi.python.org/pypi/pip):
-
-```Shell
-# make sure pip is upgraded
-pip3 install --upgrade pip
-# install jupyter notebook
-pip install jupyter
-# Run this inside ssd.pytorch
-jupyter notebook
+```bash
+python convert_to_caffe2_models.py mb1-ssd models/mobilenet-v1-ssd-mp-0_675.pth models/voc-model-labels.txt 
 ```
 
-- Now navigate to `demo/demo.ipynb` at http://localhost:8888 (by default) and have at it!
+The converted models are models/mobilenet-v1-ssd.onnx, models/mobilenet-v1-ssd_init_net.pb and models/mobilenet-v1-ssd_predict_net.pb. The models in the format of pbtxt are also saved for reference.
 
-### Try the webcam demo
-- Works on CPU (may have to tweak `cv2.waitkey` for optimal fps) or on an NVIDIA GPU
-- This demo currently requires opencv2+ w/ python bindings and an onboard webcam
-  * You can change the default webcam in `demo/live.py`
-- Install the [imutils](https://github.com/jrosebr1/imutils) package to leverage multi-threading on CPU:
-  * `pip install imutils`
-- Running `python -m demo.live` opens the webcam and begins detecting!
+## Retrain on Open Images Dataset
+
+Let's we are building a model to detect guns for security purpose.
+
+Before you start you can try the demo.
+
+```bash
+wget -P models https://storage.googleapis.com/models-hao/gun_model_2.21.pth
+wget -P models https://storage.googleapis.com/models-hao/open-images-model-labels.txt
+python run_ssd_example.py mb1-ssd models/gun_model_2.21.pth models/open-images-model-labels.txt ~/Downloads/big.JPG
+```
+
+![Example of Gun Detection](gun.jpg)
+
+
+If you manage to get more annotated data, the accuracy could become much higher.
+
+### Download data
+
+```bash
+python open_images_downloader.py --root ~/data/open_images --class_names "Handgun,Shotgun" --num_workers 20
+```
+
+It will download data into the folder ~/data/open_images.
+
+The content of the data directory looks as follows.
+
+```
+class-descriptions-boxable.csv       test                        validation
+sub-test-annotations-bbox.csv        test-annotations-bbox.csv   validation-annotations-bbox.csv
+sub-train-annotations-bbox.csv       train
+sub-validation-annotations-bbox.csv  train-annotations-bbox.csv
+```
+
+The folders train, test, validation contain the images. The files like sub-train-annotations-bbox.csv 
+is the annotation file.
+
+### Retrain
+
+```bash
+python train_ssd.py --dataset_type open_images --datasets ~/data/open_images --net mb1-ssd --pretrained_ssd models/mobilenet-v1-ssd-mp-0_675.pth --scheduler cosine --lr 0.01 --t_max 100 --validation_epochs 5 --num_epochs 100 --base_net_lr 0.001  --batch_size 5
+```
+
+You can freeze the base net, or all the layers except the prediction heads. 
+
+```
+  --freeze_base_net     Freeze base net layers.
+  --freeze_net          Freeze all the layers except the prediction head.
+```
+
+You can also use different learning rates 
+for the base net, the extra layers and the prediction heads.
+
+```
+  --lr LR, --learning-rate LR
+  --base_net_lr BASE_NET_LR
+                        initial learning rate for base net.
+  --extra_layers_lr EXTRA_LAYERS_LR
+```
+
+As subsets of open images data can be very unbalanced, it also provides
+a handy option to roughly balance the data.
+
+```
+  --balance_data        Balance training data by down-sampling more frequent
+                        labels.
+```
+
+### Test on image
+
+```bash
+python run_ssd_example.py mb1-ssd models/mobilenet-v1-ssd-Epoch-99-Loss-2.2184619531035423.pth models/open-images-model-labels.txt ~/Downloads/gun.JPG
+```
+
+
+## ONNX Friendly VGG16 SSD
+
+! The model is not really ONNX-Friendly due the issue mentioned here "https://github.com/qfgaohao/pytorch-ssd/issues/33#issuecomment-467533485"
+
+The Scaled L2 Norm Layer has been replaced with BatchNorm to make the net ONNX compatible.
+
+### Train
+
+The pretrained based is borrowed from https://s3.amazonaws.com/amdegroot-models/vgg16_reducedfc.pth .
+
+```bash
+python train_ssd.py --datasets ~/data/VOC0712/VOC2007/ ~/data/VOC0712/VOC2012/ --validation_dataset ~/data/VOC0712/test/VOC2007/ --net "vgg16-ssd" --base_net models/vgg16_reducedfc.pth  --batch_size 24 --num_epochs 150 --scheduler cosine --lr 0.0012 --t_max 150 --validation_epochs 5
+```
+
+### Eval
+
+```bash
+python eval_ssd.py --net vgg16-ssd  --dataset ~/data/VOC0712/test/VOC2007/ --trained_model models/vgg16-ssd-Epoch-115-Loss-2.819455094383535.pth --label_file models/voc-model-labels.txt
+```
 
 ## TODO
-We have accumulated the following to-do list, which we hope to complete in the near future
-- Still to come:
-  * [x] Support for the MS COCO dataset
-  * [ ] Support for SSD512 training and testing
-  * [ ] Support for training on custom datasets
 
-## Authors
-
-* [**Max deGroot**](https://github.com/amdegroot)
-* [**Ellis Brown**](http://github.com/ellisbrown)
-
-***Note:*** Unfortunately, this is just a hobby of ours and not a full-time job, so we'll do our best to keep things up to date, but no guarantees.  That being said, thanks to everyone for your continued help and feedback as it is really appreciated. We will try to address everything as soon as possible.
-
-## References
-- Wei Liu, et al. "SSD: Single Shot MultiBox Detector." [ECCV2016]((http://arxiv.org/abs/1512.02325)).
-- [Original Implementation (CAFFE)](https://github.com/weiliu89/caffe/tree/ssd)
-- A huge thank you to [Alex Koltun](https://github.com/alexkoltun) and his team at [Webyclip](http://www.webyclip.com) for their help in finishing the data augmentation portion.
-- A list of other great SSD ports that were sources of inspiration (especially the Chainer repo):
-  * [Chainer](https://github.com/Hakuyume/chainer-ssd), [Keras](https://github.com/rykov8/ssd_keras), [MXNet](https://github.com/zhreshold/mxnet-ssd), [Tensorflow](https://github.com/balancap/SSD-Tensorflow)
+1. Resnet34 Based Model.
+2. BatchNorm Fusion.

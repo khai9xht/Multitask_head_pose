@@ -8,7 +8,6 @@ from PIL import Image
 from torch.autograd import Variable
 from torch.utils.data import DataLoader
 from torch.utils.data.dataset import Dataset
-from matplotlib.colors import rgb_to_hsv, hsv_to_rgb
 from nets.yolo_training import Generator
 import cv2
 
@@ -29,16 +28,16 @@ class YoloDataset(Dataset):
 
     def get_random_data(self, annotation_line, input_shape, jitter=.3, hue=.1, sat=1.5, val=1.5):
         """实时数据增强的随机预处理"""
-        line = annotation_line.split(' ', 1)
+        line = annotation_line.split('\t', 1)
         # print(f'[INFO] line: {line}')
         image_path = line[0].replace('hpdb/', '/media/2tb/Hoang/multitask/data/BIWI')
         # print(f'[INFO] line[0]: {line[0]}')
         image = Image.open(image_path)
         iw, ih = image.size
         h, w = input_shape
-        line1 = line[1].replace('\n', '')
+        line1 = line[1].strip().split('\t')
         # print(f'[INFO] line1: [{line1}]')
-        box = np.array([np.array(list(map(float, box.split(' ')))) for box in [line1]])
+        box = np.array([np.array(list(map(float, box.split(' ')))) for box in line1])
 
         # resize image larger than input shape
         new_ar = w / h * self.rand(1 - jitter, 1 + jitter) / self.rand(1 - jitter, 1 + jitter)
