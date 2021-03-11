@@ -251,20 +251,16 @@ def draw_axis(img, yaw, pitch, roll, tdx=None, tdy=None, size=80):
 
 
 def jaccard(_box_a, _box_b):
-    b1_x1, b1_x2 = _box_a[:, 0] - _box_a[:, 2] / \
-        2, _box_a[:, 0] + _box_a[:, 2] / 2
-    b1_y1, b1_y2 = _box_a[:, 1] - _box_a[:, 3] / \
-        2, _box_a[:, 1] + _box_a[:, 3] / 2
-    b2_x1, b2_x2 = _box_b[:, 0] - _box_b[:, 2] / \
-        2, _box_b[:, 0] + _box_b[:, 2] / 2
-    b2_y1, b2_y2 = _box_b[:, 1] - _box_b[:, 3] / \
-        2, _box_b[:, 1] + _box_b[:, 3] / 2
+    # Calculate the upper left and lower right corners of ground truth
+    b1_x1, b1_x2 = _box_a[:, 0] - _box_a[:, 2] / 2, _box_a[:, 0] + _box_a[:, 2] / 2
+    b1_y1, b1_y2 = _box_a[:, 1] - _box_a[:, 3] / 2, _box_a[:, 1] + _box_a[:, 3] / 2
+    # Calculate the upper left and lower right corners of the prior box 
+    b2_x1, b2_x2 = _box_b[:, 0] - _box_b[:, 2] / 2, _box_b[:, 0] + _box_b[:, 2] / 2
+    b2_y1, b2_y2 = _box_b[:, 1] - _box_b[:, 3] / 2, _box_b[:, 1] + _box_b[:, 3] / 2
     box_a = torch.zeros_like(_box_a)
     box_b = torch.zeros_like(_box_b)
-    box_a[:, 0], box_a[:, 1], box_a[:, 2], box_a[:,
-                                                 3] = b1_x1, b1_y1, b1_x2, b1_y2
-    box_b[:, 0], box_b[:, 1], box_b[:, 2], box_b[:,
-                                                 3] = b2_x1, b2_y1, b2_x2, b2_y2
+    box_a[:, 0], box_a[:, 1], box_a[:, 2], box_a[:, 3] = b1_x1, b1_y1, b1_x2, b1_y2
+    box_b[:, 0], box_b[:, 1], box_b[:, 2], box_b[:, 3] = b2_x1, b2_y1, b2_x2, b2_y2
     A = box_a.size(0)
     B = box_b.size(0)
     max_xy = torch.min(box_a[:, 2:].unsqueeze(1).expand(A, B, 2),
@@ -275,10 +271,8 @@ def jaccard(_box_a, _box_b):
 
     inter = inter[:, :, 0] * inter[:, :, 1]
     # calculate area of boxes
-    area_a = ((box_a[:, 2]-box_a[:, 0]) *
-              (box_a[:, 3]-box_a[:, 1])).unsqueeze(1).expand_as(inter)  # [A,B]
-    area_b = ((box_b[:, 2]-box_b[:, 0]) *
-              (box_b[:, 3]-box_b[:, 1])).unsqueeze(0).expand_as(inter)  # [A,B]
+    area_a = ((box_a[:, 2]-box_a[:, 0]) * (box_a[:, 3]-box_a[:, 1])).unsqueeze(1).expand_as(inter)  # [A,B]
+    area_b = ((box_b[:, 2]-box_b[:, 0]) * (box_b[:, 3]-box_b[:, 1])).unsqueeze(0).expand_as(inter)  # [A,B]
     # calculate IOU
     union = area_a + area_b - inter
     return inter / union  # [A,B]
@@ -286,8 +280,6 @@ def jaccard(_box_a, _box_b):
 
 def clip_by_tensor(t, t_min, t_max):
     t = t.float()
-
     result = (t >= t_min).float() * t + (t < t_min).float() * t_min
-    result = (result <= t_max).float() * result + \
-        (result > t_max).float() * t_max
+    result = (result <= t_max).float() * result + (result > t_max).float() * t_max
     return result

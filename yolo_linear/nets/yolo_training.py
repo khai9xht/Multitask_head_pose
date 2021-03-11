@@ -31,7 +31,7 @@ def WrappedLoss(pred, target):
 
 
 class YOLOLoss(nn.Module):
-    def __init__(self, anchors, num_classes, img_size, cuda):
+    def __init__(self, anchors, num_classes, img_size, cuda, normalize):
         super(YOLOLoss, self).__init__()
         self.anchors = anchors
         self.num_anchors = len(anchors)
@@ -42,19 +42,22 @@ class YOLOLoss(nn.Module):
         self.img_size = img_size
 
         self.ignore_threshold = 0.5
-        self.lambda_bbox_attrs = 0.5
-        self.lambda_xy = 0.25
-        self.lambda_wh = 0.25
-        self.lambda_conf = 0.3
-        self.lambda_cls = 0.2
-        self.lambda_yaw = 0.4
-        self.lambda_pitch = 0.3
-        self.lambda_roll = 0.3
-        self.lambda_pose = 1 - self.lambda_bbox_attrs
+        self.lambda_xy = 1.0
+        self.lambda_wh = 1.0
+        self.lambda_conf = 1.0
+        self.lambda_cls = 0.5
+        self.lambda_yaw = 4/3
+        self.lambda_pitch = 4/3
+        self.lambda_roll = 4/3
         self.cuda = cuda
+        self.normalize = normalize
 
     def forward(self, input, targets=None):
-        # input shape: bs,3*(5+num_classes),13,13
+        #--------------------------------------------------------------#
+        #   input shape:    bs, 3*(5+num_classes+num_poses), 13, 13
+        #                   bs, 3*(5+num_classes+num_poses), 26, 26
+        #                   bs, 3*(5+num_classes+num_poses), 52, 52
+        #--------------------------------------------------------------#
 
         # batch size
         bs = input.size(0)
@@ -62,57 +65,67 @@ class YOLOLoss(nn.Module):
         in_h = input.size(2)
         in_w = input.size(3)
 
-        # stride
+        #--------------------------------------------------------------------------------------------------------#
+        # Calculate each feature point corresponds to how many pixels on the original picture
+        # If the feature layer is 13x13, one feature point corresponds to 32 pixels on the original image
+        # If the feature layer is 26x26, one feature point corresponds to 16 pixels on the original image
+        # If the feature layer is 52x52, a feature point corresponds to 18 pixels on the original image
+        # stride_h = stride_w = 32, 16, 8
+        #--------------------------------------------------------------------------------------------------------#
         stride_h = self.img_size[1] / in_h
         stride_w = self.img_size[0] / in_w
 
+        # Calculate anchors follow stride
         scaled_anchors = [(a_w / stride_w, a_h / stride_h) for a_w, a_h in self.anchors]
 
-        # bs,3*(5+num_classes),13,13 -> bs,3,13,13,(5+num_classes)
-        prediction = (
-            input.view(
-                bs,
-                int(self.num_anchors / 3),
-                self.bbox_attrs + self.num_poses,
-                in_h,
-                in_w,
-            )
-            .permute(0, 1, 3, 4, 2)
-            .contiguous()
-        )
+        #----------------------------------------------------------------------------------------#
+        # bs, 3*(5+num_classes+num_poses), 13, 13 -> bs, 3, 13, 13, (5+num_classes+num_poses)
+        # bs, 3*(5+num_classes+num_poses), 26, 26 -> bs, 3, 13, 13, (5+num_classes+num_poses)
+        # bs, 3*(5+num_classes+num_poses), 52, 52 -> bs, 3, 13, 13, (5+num_classes+num_poses)
+        #----------------------------------------------------------------------------------------#
+        prediction = input.view(bs, int(self.num_anchors / 3), 
+            self.bbox_attrs + self.num_poses, in_h, in_w).permute(0, 1, 3, 4, 2).contiguous()
 
+        # Adjustment parameters for the center position of the prior box
         x = torch.sigmoid(prediction[..., 0])  # Center x
         y = torch.sigmoid(prediction[..., 1])  # Center y
+        # The width and height adjustment parameters of the prior box
         w = prediction[..., 2]  # Width
         h = prediction[..., 3]  # Height
+        # confidence
         conf = torch.sigmoid(prediction[..., 4])  # Conf
+        # class
         pred_cls = torch.sigmoid(prediction[..., 5 : 5 + self.num_classes])
-
+        # poses
         pred_yaw = torch.tanh(prediction[..., 6])
         pred_pitch = torch.tanh(prediction[..., 7])
         pred_roll = torch.tanh(prediction[..., 8])
 
-        # calculate ground truth from targets
-        (
-            mask,
-            noobj_mask,
-            tx,
-            ty,
-            tw,
-            th,
-            tconf,
-            tcls,
-            yaw,
-            pitch,
-            roll,
-            box_loss_scale_x,
-            box_loss_scale_y,
-        ) = self.get_target(targets, scaled_anchors, in_w, in_h, self.ignore_threshold)
-
+        #-----------------------------------------------------------------------------------#
+        #   Find which prior boxes contain objects
+        #   Calculate the intersection ratio using the real box and the prior box
+        #   mask        batch_size, 3, in_h, in_w   objective feature points
+        #   noobj_mask  batch_size, 3, in_h, in_w   no objective feature point
+        #   tx          batch_size, 3, in_h, in_w   Center x offset
+        #   ty          batch_size, 3, in_h, in_w   Center y offset
+        #   tw          batch_size, 3, in_h, in_w   The true value of the width adjustment
+        #   th          batch_size, 3, in_h, in_w   The true value of the height adjustment
+        #   tconf       batch_size, 3, in_h, in_w   True value of confidence
+        #   tcls        batch_size, 3, in_h, in_w, num_classes  true value of class
+        #   yaw        batch_size, 3, in_h, in_w, num_classes  true value of yaw
+        #   pitch        batch_size, 3, in_h, in_w, num_classes  true value of pitch
+        #   roll        batch_size, 3, in_h, in_w, num_classes  true value of roll
+        #------------------------------------------------------------------------------------#
+        mask, noobj_mask, tx, ty, tw, th, tconf, tcls, yaw, pitch, roll, \
+            box_loss_scale_x, box_loss_scale_y = self.get_target(
+                targets, scaled_anchors, in_w, in_h, self.ignore_threshold)
+        """        
+        Decode the prediction result and judge the degree of 
+            overlap between the prediction result and the true value
+        """
         noobj_mask = self.get_ignore(
             prediction, targets, scaled_anchors, in_w, in_h, noobj_mask
         )
-
         if self.cuda:
             box_loss_scale_x = (box_loss_scale_x).cuda()
             box_loss_scale_y = (box_loss_scale_y).cuda()
@@ -124,20 +137,18 @@ class YOLOLoss(nn.Module):
         box_loss_scale = 2 - box_loss_scale_x * box_loss_scale_y
 
         #  losses.
-        loss_x = torch.sum(BCELoss(x, tx) / bs * box_loss_scale * mask)
-        loss_y = torch.sum(BCELoss(y, ty) / bs * box_loss_scale * mask)
-        loss_w = torch.sum(MSELoss(w, tw) / bs * 0.5 * box_loss_scale * mask)
-        loss_h = torch.sum(MSELoss(h, th) / bs * 0.5 * box_loss_scale * mask)
+        loss_x = torch.sum(BCELoss(x, tx) * box_loss_scale * mask)
+        loss_y = torch.sum(BCELoss(y, ty) * box_loss_scale * mask)
+        loss_w = torch.sum(MSELoss(w, tw) * 0.5 * box_loss_scale * mask)
+        loss_h = torch.sum(MSELoss(h, th) * 0.5 * box_loss_scale * mask)
 
-        loss_conf = torch.sum(BCELoss(conf, mask) * mask / bs) + torch.sum(
-            BCELoss(conf, mask) * noobj_mask / bs
-        )
+        loss_conf = torch.sum(BCELoss(conf, mask) * mask) + \
+                    torch.sum(BCELoss(conf, mask) * noobj_mask)
+        loss_cls = torch.sum(BCELoss(pred_cls[mask == 1], tcls[mask == 1]))
 
-        loss_cls = torch.sum(BCELoss(pred_cls[mask == 1], tcls[mask == 1]) / bs)
-
-        loss_yaw = torch.sum(WrappedLoss(pred_yaw, yaw) / bs * mask)
-        loss_pitch = torch.sum(MSELoss(pred_pitch, pitch) / bs * mask)
-        loss_roll = torch.sum(MSELoss(pred_roll, roll) / bs * mask)
+        loss_yaw = torch.sum(WrappedLoss(pred_yaw, yaw) * mask)
+        loss_pitch = torch.sum(MSELoss(pred_pitch, pitch) * mask)
+        loss_roll = torch.sum(MSELoss(pred_roll, roll) * mask)
 
         # print(f'[INFO] loss_x: {loss_x.device}')
         # print(f'[INFO] loss_y: {loss_y.device}')
@@ -154,82 +165,58 @@ class YOLOLoss(nn.Module):
         # print(f'[INFO] loss_pitch: {loss_pitch.device}')
         # print(f'[INFO] loss_roll: {loss_roll.device}')
 
-        loss = (
-            (loss_x + loss_y) * self.lambda_xy
-            + (loss_w + loss_h) * self.lambda_wh
-            + loss_conf * self.lambda_conf
-            + loss_cls * self.lambda_cls
-        ) * self.lambda_bbox_attrs + (
-            self.lambda_yaw * loss_yaw
-            + self.lambda_pitch * loss_pitch
-            + self.lambda_roll * loss_roll
-        ) * self.lambda_pose
+        # loss = ((loss_x + loss_y) * self.lambda_xy + (loss_w + loss_h) * self.lambda_wh \
+        #     + loss_conf * self.lambda_conf + loss_cls * self.lambda_cls) * self.lambda_bbox_attrs \
+        #     + (self.lambda_yaw * loss_yaw + self.lambda_pitch * loss_pitch \
+        #     + self.lambda_roll * loss_roll ) * self.lambda_pose
 
-        return (
-            loss,
-            loss_x.item(),
-            loss_y.item(),
-            loss_w.item(),
-            loss_h.item(),
-            loss_conf.item(),
-            loss_cls.item(),
-            loss_yaw.item(),
-            loss_pitch.item(),
-            loss_roll.item(),
-        )
+        if self.normalize:
+            num_pos = torch.sum(mask)
+            num_pos = torch.max(num_pos, torch.ones_like(num_pos))
+        else:
+            num_pos = bs/3
+        losses = {
+            "x"         : loss_x.item(),
+            "y"         : loss_y.item(),
+            "w"         : loss_w.item(),
+            "h"         : loss_h.item(),
+            "confidence": loss_conf.item(),
+            "class"     : loss_cls.item(),
+            "yaw"       : loss_yaw.item(),
+            "pitch"     : loss_pitch.item(),
+            "roll"      : loss_roll.item(),
+            "bbox attr" : self.lambda_xy * (loss_x + loss_y) + self.lambda_wh * (loss_w + loss_h) \
+                                            + self.lambda_conf * loss_conf + self.lambda_cls * loss_cls,
+            "poses"     : self.lambda_yaw * loss_yaw + self.lambda_pitch * loss_pitch + self.lambda_roll * loss_roll
+        }
+        return losses, num_pos
 
     def get_target(self, target, anchors, in_w, in_h, ignore_threshold):
         # print(f'[INFO] target: {target[0].shape}')
         # batch size of target
         bs = len(target)
 
-        anchor_index = [[0, 1, 2], [3, 4, 5], [6, 7, 8]][
-            self.feature_length.index(in_w)
-        ]
+        anchor_index = [[0, 1, 2], [3, 4, 5], [6, 7, 8]][self.feature_length.index(in_w)]
         subtract_index = [0, 3, 6][self.feature_length.index(in_w)]
 
-        mask = torch.zeros(
-            bs, int(self.num_anchors / 3), in_h, in_w, requires_grad=False
-        )
-        noobj_mask = torch.ones(
-            bs, int(self.num_anchors / 3), in_h, in_w, requires_grad=False
-        )
+        mask = torch.zeros(bs, int(self.num_anchors / 3), in_h, in_w, requires_grad=False)
+        noobj_mask = torch.ones(bs, int(self.num_anchors / 3), in_h, in_w, requires_grad=False)
 
-        tx = torch.zeros(bs, int(self.num_anchors / 3), in_h, in_w, requires_grad=False)
-        ty = torch.zeros(bs, int(self.num_anchors / 3), in_h, in_w, requires_grad=False)
-        tw = torch.zeros(bs, int(self.num_anchors / 3), in_h, in_w, requires_grad=False)
-        th = torch.zeros(bs, int(self.num_anchors / 3), in_h, in_w, requires_grad=False)
-        tconf = torch.zeros(
-            bs, int(self.num_anchors / 3), in_h, in_w, requires_grad=False
-        )
-        tcls = torch.zeros(
-            bs,
-            int(self.num_anchors / 3),
-            in_h,
-            in_w,
-            self.num_classes,
-            requires_grad=False,
-        )
-        yaw = torch.zeros(
-            bs, int(self.num_anchors / 3), in_h, in_w, requires_grad=False
-        )
-        pitch = torch.zeros(
-            bs, int(self.num_anchors / 3), in_h, in_w, requires_grad=False
-        )
-        roll = torch.zeros(
-            bs, int(self.num_anchors / 3), in_h, in_w, requires_grad=False
-        )
+        tx      = torch.zeros(bs, int(self.num_anchors / 3), in_h, in_w, requires_grad=False)
+        ty      = torch.zeros(bs, int(self.num_anchors / 3), in_h, in_w, requires_grad=False)
+        tw      = torch.zeros(bs, int(self.num_anchors / 3), in_h, in_w, requires_grad=False)
+        th      = torch.zeros(bs, int(self.num_anchors / 3), in_h, in_w, requires_grad=False)
+        tconf   = torch.zeros(bs, int(self.num_anchors / 3), in_h, in_w, requires_grad=False)
+        tcls    = torch.zeros(bs, int(self.num_anchors / 3), in_h, in_w, self.num_classes, requires_grad=False)
+        yaw     = torch.zeros(bs, int(self.num_anchors / 3), in_h, in_w, requires_grad=False)
+        pitch   = torch.zeros(bs, int(self.num_anchors / 3), in_h, in_w, requires_grad=False)
+        roll    = torch.zeros(bs, int(self.num_anchors / 3), in_h, in_w, requires_grad=False)
 
-        box_loss_scale_x = torch.zeros(
-            bs, int(self.num_anchors / 3), in_h, in_w, requires_grad=False
-        )
-        box_loss_scale_y = torch.zeros(
-            bs, int(self.num_anchors / 3), in_h, in_w, requires_grad=False
-        )
+        box_loss_scale_x = torch.zeros(bs, int(self.num_anchors / 3), in_h, in_w, requires_grad=False)
+        box_loss_scale_y = torch.zeros(bs, int(self.num_anchors / 3), in_h, in_w, requires_grad=False)
         for b in range(bs):
             if len(target[b]) == 0:
                 continue
-
             # rescale
             gxs = target[b][:, 0:1] * in_w
             gys = target[b][:, 1:2] * in_h
@@ -245,13 +232,7 @@ class YOLOLoss(nn.Module):
             )
 
             anchor_shapes = torch.FloatTensor(
-                torch.cat(
-                    (
-                        torch.zeros((self.num_anchors, 2)),
-                        torch.FloatTensor(anchors),
-                    ),
-                    1,
-                )
+                torch.cat((torch.zeros((self.num_anchors, 2)), torch.FloatTensor(anchors)), 1)
             )
 
             anch_ious = jaccard(gt_box, anchor_shapes)
@@ -279,12 +260,8 @@ class YOLOLoss(nn.Module):
                     tx[b, best_n, gj, gi] = gx - gi.float()
                     ty[b, best_n, gj, gi] = gy - gj.float()
 
-                    tw[b, best_n, gj, gi] = math.log(
-                        gw / anchors[best_n + subtract_index][0]
-                    )
-                    th[b, best_n, gj, gi] = math.log(
-                        gh / anchors[best_n + subtract_index][1]
-                    )
+                    tw[b, best_n, gj, gi] = math.log(gw / anchors[best_n + subtract_index][0])
+                    th[b, best_n, gj, gi] = math.log(gh / anchors[best_n + subtract_index][1])
                     # Ratio used to obtain xywh
                     box_loss_scale_x[b, best_n, gj, gi] = target[b][i, 2]
                     box_loss_scale_y[b, best_n, gj, gi] = target[b][i, 3]
@@ -301,36 +278,15 @@ class YOLOLoss(nn.Module):
                     roll[b, best_n, gj, gi] = target[b][i, 7]
                 else:
                     print("Step {0} out of bound".format(b))
-                    print(
-                        "gj: {0}, height: {1} | gi: {2}, width: {3}".format(
-                            gj, in_h, gi, in_w
-                        )
-                    )
+                    print("gj: {0}, height: {1} | gi: {2}, width: {3}".format(gj, in_h, gi, in_w))
                     continue
 
-        return (
-            mask,
-            noobj_mask,
-            tx,
-            ty,
-            tw,
-            th,
-            tconf,
-            tcls,
-            yaw,
-            pitch,
-            roll,
-            box_loss_scale_x,
-            box_loss_scale_y,
-        )
+        return mask, noobj_mask, tx, ty, tw, th, tconf, tcls, \
+                yaw, pitch, roll, box_loss_scale_x, box_loss_scale_y
 
-    def get_ignore(
-        self, box_prediction, target, scaled_anchors, in_w, in_h, noobj_mask
-    ):
+    def get_ignore(self, box_prediction, target, scaled_anchors, in_w, in_h, noobj_mask):
         bs = len(target)
-        anchor_index = [[0, 1, 2], [3, 4, 5], [6, 7, 8]][
-            self.feature_length.index(in_w)
-        ]
+        anchor_index = [[0, 1, 2], [3, 4, 5], [6, 7, 8]][self.feature_length.index(in_w)]
         scaled_anchors = np.array(scaled_anchors)[anchor_index]
         # print(scaled_anchors)
 
@@ -344,21 +300,12 @@ class YOLOLoss(nn.Module):
         LongTensor = torch.cuda.LongTensor if x.is_cuda else torch.LongTensor
 
         # 生成网格，先验框中心，网格左上角
-        grid_x = (
-            torch.linspace(0, in_w - 1, in_w)
-            .repeat(in_w, 1)
-            .repeat(int(bs * self.num_anchors / 3), 1, 1)
-            .view(x.shape)
-            .type(FloatTensor)
-        )
-        grid_y = (
-            torch.linspace(0, in_h - 1, in_h)
-            .repeat(in_h, 1)
-            .t()
-            .repeat(int(bs * self.num_anchors / 3), 1, 1)
-            .view(y.shape)
-            .type(FloatTensor)
-        )
+        grid_x = torch.linspace(0, in_w - 1, in_w).repeat(in_w, 1) \
+            .repeat(int(bs * self.num_anchors / 3), 1, 1).view(x.shape).type(FloatTensor)
+        
+        grid_y = torch.linspace(0, in_h - 1, in_h).repeat(in_h, 1).t() \
+            .repeat(int(bs * self.num_anchors / 3), 1, 1).view(y.shape).type(FloatTensor)
+        
 
         # 生成先验框的宽高
         anchor_w = FloatTensor(scaled_anchors).index_select(1, LongTensor([0]))
@@ -382,9 +329,7 @@ class YOLOLoss(nn.Module):
                 gy = target[i][:, 1:2] * in_h
                 gw = target[i][:, 2:3] * in_w
                 gh = target[i][:, 3:4] * in_h
-                gt_box = torch.FloatTensor(torch.cat([gx, gy, gw, gh], -1)).type(
-                    FloatTensor
-                )
+                gt_box = torch.FloatTensor(torch.cat([gx, gy, gw, gh], -1)).type(FloatTensor)
 
                 anch_ious = jaccard(gt_box, pred_boxes_for_ignore)
                 anch_ious_max, _ = torch.max(anch_ious, dim=0)
@@ -392,134 +337,3 @@ class YOLOLoss(nn.Module):
                 noobj_mask[i][anch_ious_max > self.ignore_threshold] = 0
                 # print(torch.max(anch_ious))
         return noobj_mask
-
-
-def rand(a=0, b=1):
-    return np.random.rand() * (b - a) + a
-
-
-class Generator(object):
-    def __init__(
-        self,
-        batch_size,
-        train_lines,
-        image_size,
-    ):
-
-        self.batch_size = batch_size
-        self.train_lines = train_lines
-        self.train_batches = len(train_lines)
-        self.image_size = image_size
-
-    def get_random_data(
-        self, annotation_line, input_shape, jitter=0.1, hue=0.1, sat=1.3, val=1.3
-    ):
-        line = annotation_line.split(" ", 1)
-        image_path = line[0].replace("hpdb/", "../../hpdb/BIWI")
-        image = Image.open(image_path)
-        iw, ih = image.size
-        h, w = input_shape
-        line1 = line[1].replace("\n", "")
-        box = np.array([np.array(list(map(int, box.split("")))) for box in [line1]])
-
-        # resize image
-        new_ar = w / h * rand(1 - jitter, 1 + jitter) / rand(1 - jitter, 1 + jitter)
-        scale = rand(0.5, 1.5)
-        if new_ar < 1:
-            nh = int(scale * h)
-            nw = int(nh * new_ar)
-        else:
-            nw = int(scale * w)
-            nh = int(nw / new_ar)
-        image = image.resize((nw, nh), Image.BICUBIC)
-
-        # place image
-        dx = int(rand(0, w - nw))
-        dy = int(rand(0, h - nh))
-        new_image = Image.new("RGB", (w, h), (128, 128, 128))
-        new_image.paste(image, (dx, dy))
-        image = new_image
-
-        # flip image or not
-        flip = rand() < 0.5
-        if flip:
-            image = image.transpose(Image.FLIP_LEFT_RIGHT)
-
-        # distort image
-        hue = rand(-hue, hue)
-        sat = rand(1, sat) if rand() < 0.5 else 1 / rand(1, sat)
-        val = rand(1, val) if rand() < 0.5 else 1 / rand(1, val)
-        x = cv2.cvtColor(np.array(image, np.float32) / 255, cv2.COLOR_RGB2HSV)
-        x[..., 0] += hue * 360
-        x[..., 0][x[..., 0] > 1] -= 1
-        x[..., 0][x[..., 0] < 0] += 1
-        x[..., 1] *= sat
-        x[..., 2] *= val
-        x[x[:, :, 0] > 360, 0] = 360
-        x[:, :, 1:][x[:, :, 1:] > 1] = 1
-        x[x < 0] = 0
-        image_data = cv2.cvtColor(x, cv2.COLOR_HSV2RGB) * 255
-
-        # correct boxes
-        box_data = np.zeros((len(box), len(box[0])))
-        if len(box) > 0:
-            np.random.shuffle(box)
-            box[:, [0, 2]] = box[:, [0, 2]] * nw / iw + dx
-            box[:, [1, 3]] = box[:, [1, 3]] * nh / ih + dy
-            if flip:
-                box[:, [0, 2]] = w - box[:, [2, 0]]
-            box[:, 0:2][box[:, 0:2] < 0] = 0
-            box[:, 2][box[:, 2] > w] = w
-            box[:, 3][box[:, 3] > h] = h
-            box_w = box[:, 2] - box[:, 0]
-            box_h = box[:, 3] - box[:, 1]
-            # discard invalid box
-            box = box[np.logical_and(box_w > 1, box_h > 1)]
-            # box_data = np.zeros((len(box), len(box[0])))
-            box_data[: len(box)] = box
-        if len(box) == 0:
-            return image_data, []
-
-        if (box_data[:, :4] > 0).any():
-
-            return image_data, box_data
-        else:
-            return image_data, []
-
-    def generate(self, train=True):
-        while True:
-            shuffle(self.train_lines)
-            lines = self.train_lines
-            inputs = []
-            targets = []
-            for annotation_line in lines:
-                img, y = self.get_random_data(annotation_line, self.image_size[0:2])
-
-                if len(y) != 0:
-                    boxes = np.array(y[:, :4], dtype=np.float32)
-                    boxes[:, 0] = boxes[:, 0] / self.image_size[1]
-                    boxes[:, 1] = boxes[:, 1] / self.image_size[0]
-                    boxes[:, 2] = boxes[:, 2] / self.image_size[1]
-                    boxes[:, 3] = boxes[:, 3] / self.image_size[0]
-
-                    boxes = np.maximum(np.minimum(boxes, 1), 0)
-                    boxes[:, 2] = boxes[:, 2] - boxes[:, 0]
-                    boxes[:, 3] = boxes[:, 3] - boxes[:, 1]
-
-                    boxes[:, 0] = boxes[:, 0] + boxes[:, 2] / 2
-                    boxes[:, 1] = boxes[:, 1] + boxes[:, 3] / 2
-
-                    # convert 'C to radian
-                    y[:, 4:] = y[:, 4:] / 180
-
-                    y = np.concatenate([boxes, y[:, 4:]], axis=-1)
-                img = np.array(img, dtype=np.float32)
-
-                inputs.append(np.transpose(img / 255.0, (2, 0, 1)))
-                targets.append(np.array(y, dtype=np.float32))
-                if len(targets) == self.batch_size:
-                    tmp_inp = np.array(inputs)
-                    tmp_targets = targets
-                    inputs = []
-                    targets = []
-                    yield tmp_inp, tmp_targets

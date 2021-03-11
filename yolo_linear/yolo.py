@@ -21,10 +21,10 @@ from utils.utils import non_max_suppression, bbox_iou, DecodeBox, letterbox_imag
 
 class YOLO(object):
     _defaults = {
-        "model_path": 'logs/Epoch96-Total_Loss317.6722-Val_Loss1151.2637.pth',
+        "model_path": '/content/drive/MyDrive/yolo_linear/Multitask_head_pose/yolo_linear/logs/unfreezeBackbone_Epoch86-Total_Loss1661.9517-Val_Loss1659.5705.pth',
         "model_image_size": (416, 416, 3),
         "confidence": 0.5,
-        "iou": 0.3,
+        "iou": 0.5,
         "cuda": True
     }
 
@@ -129,10 +129,7 @@ class YOLO(object):
         boxes = yolo_correct_boxes(top_ymin, top_xmin, top_ymax, top_xmax, np.array(
             [self.model_image_size[0], self.model_image_size[1]]), image_shape)
 
-        font = ImageFont.truetype(font='model_data/simhei.ttf', size=15)
-
-        thickness = (np.shape(image)[0] + np.shape(image)
-                     [1]) // self.model_image_size[0]
+        thickness = (np.shape(image)[0] + np.shape(image)[1]) // self.model_image_size[0]
 
         predictions = []
         for i, score in enumerate(top_conf):
@@ -143,6 +140,7 @@ class YOLO(object):
             bottom = bottom + 5
             right = right + 5
             yaw, pitch, roll = top_angle[i]
+            yaw, pitch, roll = yaw*90, pitch*90, roll*90
 
             top = max(0, np.floor(top + 0.5).astype('int32'))
             left = max(0, np.floor(left + 0.5).astype('int32'))
@@ -155,21 +153,21 @@ class YOLO(object):
             predictions.append(infor)
 
             # draw box and angle in image
-            # draw = ImageDraw.Draw(image)
+            draw = ImageDraw.Draw(image)
 
-            # for i in range(thickness):
-            #     draw.rectangle(
-            #         [left + i, top + i, right - i, bottom - i],
-            #         outline="red")
-            # draw.text([left + i*10, top + i*10], str(score),
-            #           fill=(255, 0, 0), font=font)
-            # del draw
-            # image_numpy = np.array(image)
-            # print(f'[PREDICT] box: {[top, left, bottom, right]}')
-            # print(f'[PREDICT] yaw = {yaw}, pitch = {pitch}, roll = {roll}')
-            # img = draw_axis(image_numpy, yaw, pitch, roll, (left+right)//2, (top + bottom)//2)
-            # image = Image.fromarray(img)
-            # image.save('test.jpg')
-            # print('save successfully !!!')
+            for i in range(thickness):
+                draw.rectangle(
+                    [left + i, top + i, right - i, bottom - i],
+                    outline="red")
+            draw.text([left + i*10, top + i*10], str(score),
+                      fill=(255, 0, 0))
+            del draw
+            image_numpy = np.array(image)
+            print(f'[PREDICT] box: {[top, left, bottom, right]}')
+            print(f'[PREDICT] yaw = {yaw}, pitch = {pitch}, roll = {roll}')
+            img = draw_axis(image_numpy, yaw, pitch, roll, (left+right)//2, (top + bottom)//2)
+            image = Image.fromarray(img)
+            image.save('test.jpg')
+            print('save successfully !!!')
 
         return predictions
